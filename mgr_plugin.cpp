@@ -88,7 +88,16 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 	RichParameterList parlst;
 	switch (ID(a)) {
 	case FP_FIRST:
-		
+		parlst.addParam(RichFileOpen(
+			"depthMap",
+			"",
+			QStringList() << "*.png " << "*.jpg",
+			"Load depth map",
+			"Choose a depth map image"));
+		parlst.addParam(RichDynamicFloat(
+			"scaleXY", 1.f, 0.1f, 5f, "scaleXY", "Scaling for X/Y coordinates"));
+		parlst.addParam(
+			RichDynamicFloat("scaleZ", 0.5f, 0.01f, 5.0f, "scaleZ", "Scaling for Z (depth)"));
 		break;
 	case FP_SECOND: {
 		
@@ -139,7 +148,140 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 	CallBackPos*)
 {
 	if (ID(filter) == FP_FIRST) {
-		
+		QString fileName = par.getString("depthMap");
+		if (fileName.isEmpty())
+			return {};
+
+		float scaleXY = par.getDynamicFloat("scaleXY");
+		float scaleZ  = par.getDynamicFloat("scaleZ");
+
+		QImage img(fileName);
+		if (img.isNull())
+			return {};
+
+		int width = img.width();
+		int height = img.height();
+
+		MeshModel* mm   = md.addNewMesh("MeshFromMap", "Generated from depth");
+		CMeshO& mesh = mm->cm;
+
+		std::vector<std::vector<int>> grid(height, std::vector<int>(width));
+		int index = 0;
+
+		for (int y = 0; y < height; ++y) {
+			for (int x = 0; x < width; ++x) {
+				QColor color = img.pixelColor(x, y);
+				double gray  = 0.299 * color.red() + 0.587 * color.green() + 0.114 * color.blue();
+				float  z     = float(gray / 255.0f) * scaleZ;
+
+				CVertexO v;
+				v.P().X() = x * scaleXY;
+				v.P().Y() = y * scaleXY;
+				v.P().Z() = z;
+
+				mesh.vert.push_back(v);
+				grid[y][x] = index++;
+			}
+		}
+		mesh.vn = mesh.vert.size();
+
+		// Výpočet výšok
+		float minZ_ = std::numeric_limits<float>::max();
+		float maxZ_ = std::numeric_limits<float>::lowest();
+
+		for (const auto& v : mesh.vert) {
+			minZ_ = std::min(minZ_, v.P().Z());
+			maxZ_ = std::max(maxZ_, v.P().Z());
+		}
+
+
+		// Centrovanie na stred (X, Y)
+		float centerX = (width - 1) * 0.5f * scaleXY;
+		float centerY = (height - 1) * 0.5f * scaleXY;
+		for (auto& v : mesh.vert) {
+			v.P().X() -= centerX;
+			v.P().Y() -= centerY;
+		}
+
+		// Dynamický výber diagonály podľa dĺžky
+		for (int y = 0; y < height - 1; ++y) {
+			for (int x = 0; x < width - 1; ++x) {
+				int i0 = grid[y][x];
+				int i1 = grid[y][x + 1];
+				int i2 = grid[y + 1][x];
+				int i3 = grid[y + 1][x + 1];
+
+				float d1 = Distance(mesh.vert[i0].P(), mesh.vert[i3].P()); // v0–v3
+				float d2 = Distance(mesh.vert[i1].P(), mesh.vert[i2].P()); // v1–v2
+
+				if (d1 < d2) {
+					// diagonála v0–v3
+					CFaceO f1, f2;
+					f1.V(0) = &mesh.vert[i0];
+					f1.V(1) = &mesh.vert[i1];
+					f1.V(2) = &mesh.vert[i3];
+					mesh.face.push_back(f1);
+					mesh.fn++;
+
+					f2.V(0) = &mesh.vert[i0];
+					f2.V(1) = &mesh.vert[i3];
+					f2.V(2) = &mesh.vert[i2];
+					mesh.face.push_back(f2);
+					mesh.fn++;
+				}
+				else {
+					// diagonála v1–v2
+					CFaceO f1, f2;
+					f1.V(0) = &mesh.vert[i0];
+					f1.V(1) = &mesh.vert[i1];
+					f1.V(2) = &mesh.vert[i2];
+					mesh.face.push_back(f1);
+					mesh.fn++;
+
+					f2.V(0) = &mesh.vert[i2];
+					f2.V(1) = &mesh.vert[i1];
+					f2.V(2) = &mesh.vert[i3];
+					mesh.face.push_back(f2);
+					mesh.fn++;
+				}
+			}
+		}
+
+		// Vytvorenie spodku modelu
+		int topLeft     = grid[0][0];
+		int topRight    = grid[0][width - 1];
+		int bottomLeft  = grid[height - 1][0];
+		int bottomRight = grid[height - 1][width - 1];
+
+		float minZ = std::numeric_limits<float>::max();
+		for (const auto& v : mesh.vert)
+			minZ = std::min(minZ, v.P().Z());
+
+		int i0 = mesh.vert.size();
+		mesh.vert.emplace_back(mesh.vert[topLeft]);
+		mesh.vert.back().P().Z() = minZ;
+		int i1 = mesh.vert.size();
+		mesh.vert.emplace_back(mesh.vert[topRight]);
+		mesh.vert.back().P().Z() = minZ;
+		int i2 = mesh.vert.size();
+		mesh.vert.emplace_back(mesh.vert[bottomLeft]);
+		mesh.vert.back().P().Z() = minZ;
+		int i3  = mesh.vert.size();
+		mesh.vert.emplace_back(mesh.vert[bottomRight]);
+		mesh.vert.back().P().Z() = minZ;
+		mesh.vn = mesh.vert.size();
+
+		CFaceO fb1, fb2;
+		fb1.V(0) = &mesh.vert[i0];
+		fb1.V(1) = &mesh.vert[i1];
+		fb1.V(2) = &mesh.vert[i2];
+		mesh.face.push_back(fb1);
+
+		fb2.V(0) = &mesh.vert[i2];
+		fb2.V(1) = &mesh.vert[i1];
+		fb2.V(2) = &mesh.vert[i3];
+		mesh.face.push_back(fb2);
+		mesh.fn += 2;		
 	}
 
 	else if (ID(filter) == FP_SECOND) {

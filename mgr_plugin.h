@@ -19,7 +19,7 @@ private:
 
 public:
 	enum { FP_FIRST, FP_SECOND, FP_THIRD };
-
+	
 	Mgr_plugin();
 	QString pluginName() const;
 	virtual QString filterName(ActionIDType filter) const;
