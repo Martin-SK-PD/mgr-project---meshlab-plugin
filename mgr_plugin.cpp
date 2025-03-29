@@ -95,9 +95,9 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 			"Load depth map",
 			"Choose a depth map image"));
 		parlst.addParam(RichDynamicFloat(
-			"scaleXY", 1.f, 0.1f, 5f, "scaleXY", "Scaling for X/Y coordinates"));
+			"scaleXY", 0.01f, 0.000001f, 0.3f, "scaleXY", "Scaling for X/Y coordinates"));
 		parlst.addParam(
-			RichDynamicFloat("scaleZ", 0.5f, 0.01f, 5.0f, "scaleZ", "Scaling for Z (depth)"));
+			RichDynamicFloat("scaleZ", 1.0f, 0.01f, 5.0f, "scaleZ", "Scaling for Z (depth)"));
 		break;
 	case FP_SECOND: {
 		
@@ -281,7 +281,15 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		fb2.V(1) = &mesh.vert[i1];
 		fb2.V(2) = &mesh.vert[i3];
 		mesh.face.push_back(fb2);
-		mesh.fn += 2;		
+		mesh.fn += 2;
+		
+		// Normály a box
+		UpdateBounding<CMeshO>::Box(mesh);
+		UpdateNormal<CMeshO>::PerFaceNormalized(mesh);
+		UpdateNormal<CMeshO>::PerVertexNormalized(mesh);
+		// UpdateNormal<CMeshO>::PerFace(mesh);
+		// UpdateNormal<CMeshO>::PerVertex(mesh);
+		// UpdateNormal<CMeshO>::PerVertexNormalizedPerFaceNormalized(mesh);
 	}
 
 	else if (ID(filter) == FP_SECOND) {
