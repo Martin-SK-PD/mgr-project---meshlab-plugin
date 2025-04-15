@@ -100,7 +100,18 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 			RichDynamicFloat("scaleZ", 1.0f, 0.01f, 5.0f, "scaleZ", "Scaling for Z (depth)"));
 		break;
 	case FP_SECOND: {
-		
+		float avgZ = 0.0f;
+		parlst.addParam(RichDynamicFloat(
+			"thresholdZ",
+			avgZ,
+			globalMinZ,
+			globalMaxZ,
+			"Min height",
+			"Minimum relative Z to keep"));
+
+		QStringList modes;
+		modes << "flat" << "curved" << "flatten edges";
+		parlst.addParam(RichEnum("referencePlane", 0, modes, "Reference", "Base reference shape"));
 		break;
 	}
 	case FP_THIRD: {
@@ -293,6 +304,61 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 	}
 
 	else if (ID(filter) == FP_SECOND) {
+
+		MeshModel* mm   = md.mm();
+		CMeshO&    mesh = mm->cm;
+
+		float thresholdZ = par.getDynamicFloat("thresholdZ");
+
+		QStringList modes;
+		modes << "flat" << "curved" << "flatten edges";
+		QString mode = modes[par.getEnum("referencePlane")];
+
+		UpdateBounding<CMeshO>::Box(mesh);
+
+		int   movedCount = 0;
+		float maxShift   = 0.f;
+
+		//FILE* logFile = fopen("debug_output.txt", "w");
+		FILE* logFile = NULL;
+		if (!logFile) {
+			qWarning("Unable to open debug_output.txt");
+		}
+		else {
+			fprintf(logFile, "=== FP_SECOND DEBUG LOG ===\n");
+			fprintf(logFile, "Mode: %s\n", mode.toUtf8().constData());
+			fprintf(logFile, "ThresholdZ: %.4f\n", thresholdZ);
+			fprintf(
+				logFile,
+				"Bounding box X range: %.2f .. %.2f (DimX=%.2f)\n",
+				mesh.bbox.min.X(),
+				mesh.bbox.max.X(),
+				mesh.bbox.DimX());
+		}
+
+		if (mode == "flat") {
+			for (auto& v : mesh.vert) {
+				if (v.P().Z() < thresholdZ) {
+					if (logFile)
+						fprintf(logFile, "Vertex moved (flat): Z=%.4f -> Z=0.0\n", v.P().Z());
+					maxShift  = std::max(maxShift, thresholdZ - v.P().Z());
+					v.P().Z() = 0.f;
+					movedCount++;
+				}
+			}
+		}
+
+		if (logFile) {
+			fprintf(logFile, "Total moved vertices: %d\n", movedCount);
+			fprintf(logFile, "Max shift: %.4f\n", maxShift);
+			fclose(logFile);
+		}
+
+		UpdateNormal<CMeshO>::PerFaceNormalized(mesh);
+		UpdateNormal<CMeshO>::PerVertexNormalized(mesh);
+		UpdateBounding<CMeshO>::Box(mesh);
+
+		qDebug("FP_SECOND: moved %d vertices (max shift %.4f). Log saved.", movedCount, maxShift);
 		
 	}
 
@@ -312,7 +378,7 @@ int Mgr_plugin::postCondition(const QAction* filter) const
 {
 	switch (ID(filter)) {
 	case FP_FIRST: return MeshModel::MM_NONE;
-	case FP_SECOND: return MeshModel::MM_NONE;
+	case FP_SECOND: return MeshModel::MM_VERTCOORD;
 	case FP_THIRD: return MeshModel::MM_NONE;
 	default: assert(0);
 	}
@@ -324,7 +390,8 @@ int Mgr_plugin::postCondition(const QAction* filter) const
 int Mgr_plugin::getRequirements(const QAction* filter){
 	switch (ID(filter)) {
 	case FP_FIRST: return MeshModel::MM_VERTCOORD;
-	case FP_SECOND: return;
+	case FP_SECOND: return MeshModel::MM_VERTCOORD | MeshModel::MM_FACEFACETOPO 
+		| MeshModel::MM_FACENORMAL | MeshModel::MM_FACEFLAG;;
 	case FP_THIRD: return;
 	default: assert(0); return MeshModel::MM_NONE;
 	}
