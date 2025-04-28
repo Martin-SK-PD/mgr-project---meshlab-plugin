@@ -7,6 +7,7 @@
 
 #include <QFileDialog>
 #include <QImage>
+#include <QPainter>
 #include <cmath>
 #include <common/plugins/interfaces/filter_plugin.h>
 #include <cstdio>
@@ -23,6 +24,13 @@
 using namespace std;
 using namespace tri;
 using namespace vcg;
+
+float Mgr_plugin::globalMinZ = 0.f;
+float Mgr_plugin::globalMaxZ = 1.f;
+
+float Mgr_plugin::CURVED_REGION_START = -0.5f;
+float Mgr_plugin::CURVED_REGION_END   = 0.5f;
+float Mgr_plugin::CURVED_MAX_Z        = 1.f;
 
 
 Mgr_plugin::Mgr_plugin()
@@ -100,7 +108,7 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 			RichDynamicFloat("scaleZ", 1.0f, 0.01f, 5.0f, "scaleZ", "Scaling for Z (depth)"));
 		break;
 	case FP_SECOND: {
-		float avgZ = 0.0f;
+		float avgZ = (Mgr_plugin::globalMinZ + Mgr_plugin::globalMaxZ) / 2.0f;
 		parlst.addParam(RichDynamicFloat(
 			"thresholdZ",
 			avgZ,
@@ -170,11 +178,11 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		if (img.isNull())
 			return {};
 
-		int width = img.width();
+		int width  = img.width();
 		int height = img.height();
 
 		MeshModel* mm   = md.addNewMesh("MeshFromMap", "Generated from depth");
-		CMeshO& mesh = mm->cm;
+		CMeshO&    mesh = mm->cm;
 
 		std::vector<std::vector<int>> grid(height, std::vector<int>(width));
 		int index = 0;
@@ -205,6 +213,9 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 			maxZ_ = std::max(maxZ_, v.P().Z());
 		}
 
+		// Uloženie do statických premenných
+		Mgr_plugin::globalMinZ = minZ_;
+		Mgr_plugin::globalMaxZ = maxZ_;
 
 		// Centrovanie na stred (X, Y)
 		float centerX = (width - 1) * 0.5f * scaleXY;
@@ -271,16 +282,16 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		int i0 = mesh.vert.size();
 		mesh.vert.emplace_back(mesh.vert[topLeft]);
 		mesh.vert.back().P().Z() = minZ;
-		int i1 = mesh.vert.size();
+		int i1                   = mesh.vert.size();
 		mesh.vert.emplace_back(mesh.vert[topRight]);
 		mesh.vert.back().P().Z() = minZ;
-		int i2 = mesh.vert.size();
+		int i2                   = mesh.vert.size();
 		mesh.vert.emplace_back(mesh.vert[bottomLeft]);
 		mesh.vert.back().P().Z() = minZ;
-		int i3  = mesh.vert.size();
+		int i3                   = mesh.vert.size();
 		mesh.vert.emplace_back(mesh.vert[bottomRight]);
 		mesh.vert.back().P().Z() = minZ;
-		mesh.vn = mesh.vert.size();
+		mesh.vn                  = mesh.vert.size();
 
 		CFaceO fb1, fb2;
 		fb1.V(0) = &mesh.vert[i0];
@@ -293,9 +304,18 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		fb2.V(2) = &mesh.vert[i3];
 		mesh.face.push_back(fb2);
 		mesh.fn += 2;
-		
-		// Normály a box
+
+		// Nastavenie curved pásma a maxZ podľa centrovaného bboxu
 		UpdateBounding<CMeshO>::Box(mesh);
+		float minY__        = mesh.bbox.min.Y();
+		float maxY__        = mesh.bbox.max.Y();
+		float minZ__        = mesh.bbox.min.Z();
+		float maxZ__        = mesh.bbox.max.Z();
+		CURVED_REGION_START = minY__ + 0.105f * (maxY__ - minY__); 
+		CURVED_REGION_END   = minY__ + 0.775f * (maxY__ - minY__); 
+		CURVED_MAX_Z        = maxZ__;
+
+		// Normály a box
 		UpdateNormal<CMeshO>::PerFaceNormalized(mesh);
 		UpdateNormal<CMeshO>::PerVertexNormalized(mesh);
 		// UpdateNormal<CMeshO>::PerFace(mesh);
@@ -346,6 +366,59 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 					movedCount++;
 				}
 			}
+		}
+		else if (mode == "curved") {
+			float flatStartY  = CURVED_REGION_START;
+			float flatEndY    = CURVED_REGION_END;
+			float minY        = mesh.bbox.min.Y();
+			float maxY        = mesh.bbox.max.Y();
+			float flatReturnY = minY + 0.835f * (maxY - minY);
+
+			int movedCount = 0;
+
+			for (size_t i = 0; i < mesh.vert.size(); ++i) {
+				auto& v = mesh.vert[i];
+				if (v.IsD())
+					continue;
+
+				// Preskoč spodné 4 vertexy (základňa modelu)
+				if (i >= mesh.vert.size() - 4)
+					continue;
+
+				float y     = v.P().Y();
+				float baseZ = 0.f;
+
+				if (y > flatReturnY) {
+					if (v.P().Z() != 0.f) {
+						v.P().Z() = 0.f;
+						movedCount++;
+					}
+					continue;
+				}
+
+				if (y < flatStartY) {
+					float dy = (y - minY) / (flatStartY - minY + 1e-6f);
+					baseZ    = CURVED_MAX_Z * (1.f - dy) * (1.f - dy);
+				}
+				else if (y > flatEndY) {
+					float dy = (y - flatEndY) / (flatReturnY - flatEndY + 1e-6f);
+					baseZ    = CURVED_MAX_Z * dy * dy;
+				}
+				else {
+					baseZ = 0.f;
+				}
+
+				if ((v.P().Z() - baseZ) < thresholdZ) {
+					v.P().Z() = baseZ;
+					movedCount++;
+				}
+			}
+
+			UpdateNormal<CMeshO>::PerFaceNormalized(mesh);
+			UpdateNormal<CMeshO>::PerVertexNormalized(mesh);
+			UpdateBounding<CMeshO>::Box(mesh);
+
+			qDebug("FP_SECOND (curved): moved %d vertices", movedCount);
 		}
 
 		if (logFile) {

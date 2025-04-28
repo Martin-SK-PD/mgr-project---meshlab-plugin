@@ -15,11 +15,17 @@ class Mgr_plugin : public QObject, public FilterPlugin
 	Q_INTERFACES(FilterPlugin)
 
 private:
-	
+
+	static float globalMinZ;
+	static float  globalMaxZ;
+
+	static float CURVED_REGION_START;
+	static float  CURVED_REGION_END;
+	static float  CURVED_MAX_Z;  
 
 public:
 	enum { FP_FIRST, FP_SECOND, FP_THIRD };
-	
+
 	Mgr_plugin();
 	QString pluginName() const;
 	virtual QString filterName(ActionIDType filter) const;
