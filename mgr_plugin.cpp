@@ -421,6 +421,25 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 			qDebug("FP_SECOND (curved): moved %d vertices", movedCount);
 		}
 
+
+		else if (mode == "flatten edges") {
+			for (auto& v : mesh.vert) {
+				float y = v.P().Y();
+				if (y < CURVED_REGION_START || y > CURVED_REGION_END) {
+					if (logFile) {
+						fprintf(
+							logFile,
+							"Flattening edge vertex: X=%.2f Z=%.4f -> Z=0.0\n",
+							y,
+							v.P().Z());
+					}
+					maxShift  = std::max(maxShift, std::abs(v.P().Z()));
+					v.P().Z() = 0.f;
+					movedCount++;
+				}
+			}
+		}
+
 		if (logFile) {
 			fprintf(logFile, "Total moved vertices: %d\n", movedCount);
 			fprintf(logFile, "Max shift: %.4f\n", maxShift);
