@@ -123,7 +123,12 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 		break;
 	}
 	case FP_THIRD: {
-		
+		QStringList options;
+		options << "Shape Spectrum - MPEG 7";
+		parlst.addParam(
+			RichEnum("descriptorType", 0, options, "Descriptor", "Select descriptor to export"));
+		parlst.addParam(
+			RichFileSave("outputFile", "", "*.png", "Save descriptor as"));
 		break;
 	}
 
@@ -455,6 +460,35 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 	}
 
 	else if (ID(filter) == FP_THIRD) {
+		CMeshO& mesh = md.mm()->cm;
+
+		//FILE* logFile1 = fopen("debug_output1.txt", "w");
+		FILE* logFile1 = NULL;
+		if (!logFile1) {
+			qWarning("Unable to open debug_output1.txt");
+		}
+
+		QString outputFile = par.getString("outputFile");
+
+		QStringList modes;
+		modes << "Shape Spectrum - MPEG 7";
+		QString descType = modes[par.getEnum("descriptorType")];
+
+		if (logFile1) {
+			fprintf(logFile1, "%s\n", outputFile.toUtf8().constData());
+			fprintf(logFile1, "%s\n", descType.toUtf8().constData());
+		}
+
+		if (descType == "Shape Spectrum - MPEG 7") {
+			auto spectrum = computeShapeSpectrumDescriptor(mesh); 
+			saveSpectrumHistogramImage(
+				spectrum.spectrumBins, outputFile.toStdString());
+			qDebug("Shape Spectrum saved to %s", qUtf8Printable(outputFile));
+		}
+
+		if (logFile1) {
+			fclose(logFile1);
+		}
 
 	}
 
