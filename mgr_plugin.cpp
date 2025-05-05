@@ -33,6 +33,92 @@ float Mgr_plugin::CURVED_REGION_END   = 0.5f;
 float Mgr_plugin::CURVED_MAX_Z        = 1.f;
 
 
+
+float roundUpToNice(float val)
+{
+	float scale = pow(10.0f, floor(log10(val)));
+	float n     = val / scale;
+	if (n <= 1.0f)
+		return 1.0f * scale;
+	else if (n <= 2.0f)
+		return 2.0f * scale;
+	else if (n <= 5.0f)
+		return 5.0f * scale;
+	else
+		return 10.0f * scale;
+}
+
+
+
+
+void saveSpectrumHistogramImage(const std::vector<float>& data, const std::string& filename)
+{
+	const int width  = 800;
+	const int height = 400;
+	const int margin = 50;
+
+	QImage img(width, height, QImage::Format_ARGB32);
+	img.fill(Qt::white);
+
+	QPainter painter(&img);
+	painter.setRenderHint(QPainter::Antialiasing);
+	painter.setPen(QPen(Qt::black, 2));
+	QFont font = painter.font();
+	font.setPointSize(8);
+	painter.setFont(font);
+
+	float peakVal = *std::max_element(data.begin(), data.end());
+	float maxVal  = roundUpToNice(peakVal * 1.5f);
+
+	const int   bins   = static_cast<int>(data.size());
+	const float xScale = float(width - 2 * margin) / bins;
+	const float yScale = float(height - 2 * margin) / maxVal;
+
+	// Draw axes
+	painter.drawLine(margin, height - margin, margin, margin);                  // Y
+	painter.drawLine(margin, height - margin, width - margin, height - margin); // X
+
+	// Y ticks
+	const int yTicks = 5;
+	for (int i = 0; i <= yTicks; ++i) {
+		float yValue = i * maxVal / yTicks;
+		int   y      = height - margin - int(yValue * yScale);
+		painter.drawLine(margin - 5, y, margin + 5, y);
+		QString label = QString::number(yValue, 'f', 2);
+		painter.drawText(margin - 40, y + 4, label);
+	}
+
+	// Draw histogram
+	painter.setPen(QPen(Qt::blue, 2));
+	for (int i = 1; i < bins; ++i) {
+		int x1 = margin + int((i - 1) * xScale);
+		int y1 = height - margin - int(data[i - 1] * yScale);
+		int x2 = margin + int(i * xScale);
+		int y2 = height - margin - int(data[i] * yScale);
+		painter.drawLine(x1, y1, x2, y2);
+	}
+
+	// X axis labels
+	const int xLabelStep = std::max(1, bins / 10);
+	painter.setPen(Qt::black);
+	for (int i = 0; i < bins; i += xLabelStep) {
+		int x = margin + int(i * xScale);
+		painter.drawLine(x, height - margin - 5, x, height - margin + 5);
+		QString label = QString::number(i);
+		painter.drawText(x - 10, height - margin + 20, label);
+	}
+
+	bool ok = img.save(QString::fromStdString(filename));
+	//FILE* debugFile = fopen("save_histogram_debug.txt", "w");
+	FILE* debugFile = NULL;
+	if (debugFile) {
+		fprintf(debugFile, "Saved to: %s\nSuccess: %s\n", filename.c_str(), ok ? "true" : "false");
+		fclose(debugFile);
+	}
+
+}
+
+
 Mgr_plugin::Mgr_plugin()
 {
 	typeList = {FP_FIRST, FP_SECOND, FP_THIRD};
