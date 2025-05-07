@@ -34,6 +34,54 @@ float Mgr_plugin::CURVED_MAX_Z        = 1.f;
 
 
 
+
+struct ShapeSpectrumDescriptor
+{
+	std::vector<float> spectrumBins;
+	float              planarAreaRatio   = 0.0f;
+	float              singularAreaRatio = 0.0f;
+};
+
+
+template<typename T>
+T myClamp(T val, T minVal, T maxVal)
+{
+	return std::max(minVal, std::min(val, maxVal));
+}
+
+
+float computeFaceArea(const CMeshO::FaceType& f)
+{
+	return DoubleArea(f) / 2.0f;
+}
+
+
+float computeFaceMeanCurvature(
+	const CMeshO& mesh,
+	const CMeshO::FaceType& f,
+	FILE* debugFile = nullptr)
+{
+	Point3f n0       = f.N();
+	float   accAngle = 0.0f;
+	int     count    = 0;
+	for (int i = 0; i < 3; ++i) {
+		auto* adj = f.FFp(i);
+		if (adj && adj != &f && !adj->IsD()) {
+			accAngle += Angle(n0, adj->N());
+			++count;
+		}
+	}
+	float result = (count > 0) ? accAngle / count : 0.f;
+	if (debugFile)
+		fprintf(debugFile, "Mean curvature: %.6f\n", result);
+	return result;
+}
+
+
+
+
+
+
 float roundUpToNice(float val)
 {
 	float scale = pow(10.0f, floor(log10(val)));
