@@ -98,6 +98,81 @@ float roundUpToNice(float val)
 
 
 
+ShapeSpectrumDescriptor computeShapeSpectrumDescriptor(const CMeshO& mesh, int numBins = 90)
+{
+	ShapeSpectrumDescriptor descriptor;
+	descriptor.spectrumBins.resize(numBins, 0.0f);
+
+	float       totalArea = 0.f, planarArea = 0.f, singularArea = 0.f;
+	const float curvatureThreshold = 0.1f;
+
+	UpdateTopology<CMeshO>::FaceFace((CMeshO&) mesh);
+	UpdateNormal<CMeshO>::PerFaceNormalized((CMeshO&) mesh);
+
+	//FILE* debugFile = fopen("spectrum_debug.txt", "w");
+	FILE* debugFile = NULL;
+	if (debugFile)
+		fprintf(debugFile, "Shape Spectrum Descriptor Debug Output\n");
+
+	for (const auto& f : mesh.face) {
+		if (f.IsD())
+			continue;
+
+		float area = computeFaceArea(f);
+		totalArea += area;
+
+		float curvature = computeFaceMeanCurvature(mesh, f, debugFile);
+		if (debugFile)
+			fprintf(debugFile, "Area: %.6f\n", area);
+
+		if (curvature < curvatureThreshold) {
+			planarArea += area;
+			continue;
+		}
+
+		int borderCount = 0;
+		for (int i = 0; i < 3; ++i) {
+			auto* adj = f.FFp(i);
+			if (!adj || adj == &f || adj->IsD())
+				++borderCount;
+		}
+		if (borderCount > 0) {
+			singularArea += area;
+			continue;
+		}
+
+		float shapeIdx = 0.5f - (1.0f / float(M_PI)) * atan(curvature);
+		shapeIdx       = myClamp(shapeIdx, 0.0f, 1.0f - 1e-6f);
+		int binIdx     = std::min(int(shapeIdx * numBins), numBins - 1);
+		descriptor.spectrumBins[binIdx] += area;
+	}
+
+	if (totalArea > 0.f) {
+		for (auto& val : descriptor.spectrumBins)
+			val /= totalArea;
+		descriptor.planarAreaRatio   = planarArea / totalArea;
+		descriptor.singularAreaRatio = singularArea / totalArea;
+	}
+
+	if (debugFile) {
+		fprintf(debugFile, "\nNormalized Spectrum:\n");
+		for (size_t i = 0; i < descriptor.spectrumBins.size(); ++i)
+			fprintf(debugFile, "Bin %2zu: %.6f\n", i, descriptor.spectrumBins[i]);
+		fprintf(
+			debugFile,
+			"Planar Ratio: %.4f\nSingular Ratio: %.4f\n",
+			descriptor.planarAreaRatio,
+			descriptor.singularAreaRatio);
+		fclose(debugFile);
+	}
+
+	return descriptor;
+}
+
+
+
+
+
 
 void saveSpectrumHistogramImage(const std::vector<float>& data, const std::string& filename)
 {
