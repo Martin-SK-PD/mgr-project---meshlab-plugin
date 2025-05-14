@@ -242,6 +242,60 @@ void saveSpectrumHistogramImage(const std::vector<float>& data, const std::strin
 }
 
 
+
+std::vector<float> computeD2Histogram(const CMeshO& mesh, int numSamples = 100000, int numBins = 90)
+{
+	std::vector<float> hist(numBins, 0.0f);
+	if (mesh.vert.empty())
+		return hist;
+
+	// Vytvorenie vektora neodstránených vertexov
+	std::vector<const CVertexO*> validVerts;
+	for (const auto& v : mesh.vert)
+		if (!v.IsD())
+			validVerts.push_back(&v);
+
+	if (validVerts.size() < 2)
+		return hist;
+
+	// Príprava na sampling
+	std::random_device rd;
+	std::mt19937 rng(rd());
+	std::uniform_int_distribution<size_t> dist(0, validVerts.size() - 1);
+
+	float              maxDist = 0.f;
+	std::vector<float> distances;
+	distances.reserve(numSamples);
+
+	for (int i = 0; i < numSamples; ++i) {
+		const auto* v1 = validVerts[dist(rng)];
+		const auto* v2 = validVerts[dist(rng)];
+
+		if (v1 == v2)
+			continue;
+
+		float d = Distance(v1->cP(), v2->cP());
+		distances.push_back(d);
+		maxDist = std::max(maxDist, d);
+	}
+
+	// naplnenie histogramu
+	for (float d : distances) {
+		int bin = int((d / maxDist) * numBins);
+		if (bin >= numBins)
+			bin = numBins - 1;
+		hist[bin] += 1.f;
+	}
+
+	// Normalizácia
+	for (float& val : hist)
+		val /= distances.size();
+
+	return hist;
+}
+
+
+
 Mgr_plugin::Mgr_plugin()
 {
 	typeList = {FP_FIRST, FP_SECOND, FP_THIRD};
@@ -333,7 +387,7 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 	}
 	case FP_THIRD: {
 		QStringList options;
-		options << "Shape Spectrum - MPEG 7";
+		options << "Shape Spectrum - MPEG 7 v1 " << "D2 Histogram";
 		parlst.addParam(
 			RichEnum("descriptorType", 0, options, "Descriptor", "Select descriptor to export"));
 		parlst.addParam(
@@ -680,7 +734,7 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		QString outputFile = par.getString("outputFile");
 
 		QStringList modes;
-		modes << "Shape Spectrum - MPEG 7";
+		modes << "Shape Spectrum - MPEG 7 v1" << "D2 Histogram";
 		QString descType = modes[par.getEnum("descriptorType")];
 
 		if (logFile1) {
@@ -688,7 +742,12 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 			fprintf(logFile1, "%s\n", descType.toUtf8().constData());
 		}
 
-		if (descType == "Shape Spectrum - MPEG 7") {
+		if (descType == "D2 Histogram") {
+			auto hist = computeD2Histogram(mesh);
+			saveSpectrumHistogramImage(hist, outputFile.toStdString());
+			qDebug("D2 Histogram saved to %s", qUtf8Printable(outputFile));
+		}
+		else if (descType == "Shape Spectrum - MPEG 7 v1") {
 			auto spectrum = computeShapeSpectrumDescriptor(mesh); 
 			saveSpectrumHistogramImage(
 				spectrum.spectrumBins, outputFile.toStdString());
