@@ -34,7 +34,6 @@ float Mgr_plugin::CURVED_MAX_Z        = 1.f;
 
 
 
-
 struct ShapeSpectrumDescriptor
 {
 	std::vector<float> spectrumBins;
@@ -57,7 +56,7 @@ float computeFaceArea(const CMeshO::FaceType& f)
 
 
 float computeFaceMeanCurvature(
-	const CMeshO& mesh,
+	const CMeshO&           mesh,
 	const CMeshO::FaceType& f,
 	FILE* debugFile = nullptr)
 {
@@ -77,24 +76,6 @@ float computeFaceMeanCurvature(
 	return result;
 }
 
-
-
-
-
-
-float roundUpToNice(float val)
-{
-	float scale = pow(10.0f, floor(log10(val)));
-	float n     = val / scale;
-	if (n <= 1.0f)
-		return 1.0f * scale;
-	else if (n <= 2.0f)
-		return 2.0f * scale;
-	else if (n <= 5.0f)
-		return 5.0f * scale;
-	else
-		return 10.0f * scale;
-}
 
 
 
@@ -170,6 +151,127 @@ ShapeSpectrumDescriptor computeShapeSpectrumDescriptor(const CMeshO& mesh, int n
 }
 
 
+
+ShapeSpectrumDescriptor computeShapeSpectrumFromCurvature(CMeshO& mesh, int numBins = 90)
+{
+	ShapeSpectrumDescriptor descriptor;
+	descriptor.spectrumBins.resize(numBins, 0.0f);
+
+	float totalArea    = 0.f;
+	float planarArea   = 0.f;
+	float singularArea = 0.f;
+
+	const float curvatureThreshold = 0.05f;
+	const int   minBorderEdges     = 2;
+
+	//FILE* debug = fopen("spectrum_debug_v2.txt", "w");
+	FILE* debug = NULL;
+	if (debug)
+		fprintf(debug, "== MPEG-7 Shape Spectrum (v2) Debug ==\n");
+
+
+	for (const auto& f : mesh.face) {
+		if (f.IsD())
+			continue;
+
+		float area = computeFaceArea(f);
+		totalArea += area;
+
+		int borderCount = 0;
+		for (int i = 0; i < 3; ++i) {
+			auto* adj = f.FFp(i);
+			if (!adj || adj == &f || adj->IsD())
+				++borderCount;
+		}
+
+		if (borderCount >= minBorderEdges) {
+			singularArea += area;
+			if (debug)
+				fprintf(debug, "Skipped face (border), area=%.6f\n", area);
+			continue;
+		}
+
+		float k1 = 0.f, k2 = 0.f;
+		int   valid = 0;
+		for (int i = 0; i < 3; ++i) {
+			const auto* v = f.V(i);
+			if (!v->IsD() && std::isfinite(v->K1()) && std::isfinite(v->K2())) {
+				k1 += v->K1();
+				k2 += v->K2();
+				++valid;
+			}
+		}
+
+		if (valid == 0) {
+			if (debug)
+				fprintf(debug, "Skipped face (no valid curvatures)\n");
+			continue;
+		}
+
+		k1 /= valid;
+		k2 /= valid;
+
+		float ka = std::sqrt(k1 * k1 + k2 * k2);
+		if (ka < curvatureThreshold) {
+			planarArea += area;
+			if (debug)
+				fprintf(debug, "Skipped face (planar), ka=%.6f, area=%.6f\n", ka, area);
+			continue;
+		}
+
+		float shapeIdx = 0.5f - (1.0f / float(M_PI)) * std::atan((k1 + k2) / (k1 - k2 + 1e-6f));
+		shapeIdx       = myClamp(shapeIdx, 0.0f, 1.0f - 1e-6f);
+		int binIdx     = std::min(int(shapeIdx * numBins), numBins - 1);
+		descriptor.spectrumBins[binIdx] += area;
+
+		if (debug)
+			fprintf(
+				debug,
+				"face: k1=%.6f, k2=%.6f, idx=%.3f, bin=%d, area=%.6f\n",
+				k1,
+				k2,
+				shapeIdx,
+				binIdx,
+				area);
+	}
+
+	if (totalArea > 0.f) {
+		for (auto& val : descriptor.spectrumBins)
+			val /= totalArea;
+		descriptor.planarAreaRatio   = planarArea / totalArea;
+		descriptor.singularAreaRatio = singularArea / totalArea;
+	}
+
+	if (debug) {
+		fprintf(debug, "\n== Normalized Histogram ==\n");
+		for (size_t i = 0; i < descriptor.spectrumBins.size(); ++i)
+			fprintf(debug, "bin %02zu: %.6f\n", i, descriptor.spectrumBins[i]);
+		fprintf(
+			debug,
+			"Planar: %.4f, Singular: %.4f\n",
+			descriptor.planarAreaRatio,
+			descriptor.singularAreaRatio);
+		fclose(debug);
+	}
+
+	return descriptor;
+}
+
+
+
+float roundUpToNice(float val)
+{
+	float scale = pow(10.0f, floor(log10(val)));
+	float n     = val / scale;
+	if (n <= 1.0f)
+		return 1.0f * scale;
+	else if (n <= 2.0f)
+		return 2.0f * scale;
+	else if (n <= 5.0f)
+		return 5.0f * scale;
+	else
+		return 10.0f * scale;
+}
 
 
 
@@ -387,7 +489,8 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 	}
 	case FP_THIRD: {
 		QStringList options;
-		options << "Shape Spectrum - MPEG 7 v1 " << "D2 Histogram";
+		options << "Shape Spectrum - MPEG 7 v1 " << "D2 Histogram"
+				<< "Shape Spectrum - MPEG 7 v2";
 		parlst.addParam(
 			RichEnum("descriptorType", 0, options, "Descriptor", "Select descriptor to export"));
 		parlst.addParam(
@@ -734,7 +837,7 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 		QString outputFile = par.getString("outputFile");
 
 		QStringList modes;
-		modes << "Shape Spectrum - MPEG 7 v1" << "D2 Histogram";
+		modes << "Shape Spectrum - MPEG 7 v1" << "D2 Histogram" << "Shape Spectrum - MPEG 7 v2";
 		QString descType = modes[par.getEnum("descriptorType")];
 
 		if (logFile1) {
@@ -752,6 +855,21 @@ std::map<std::string, QVariant> Mgr_plugin::applyFilter(
 			saveSpectrumHistogramImage(
 				spectrum.spectrumBins, outputFile.toStdString());
 			qDebug("Shape Spectrum saved to %s", qUtf8Printable(outputFile));
+		}
+		else if (descType == "Shape Spectrum - MPEG 7 v2") {
+
+			UpdateTopology<CMeshO>::FaceFace(mesh);
+			UpdateTopology<CMeshO>::VertexFace(mesh);
+			UpdateNormal<CMeshO>::PerFaceNormalized(mesh);
+			UpdateNormal<CMeshO>::PerVertexNormalized(mesh);
+			UpdateCurvature<CMeshO>::PrincipalDirections(mesh);
+
+
+			auto spectrum = computeShapeSpectrumFromCurvature(mesh);
+			
+
+			saveSpectrumHistogramImage(spectrum.spectrumBins, outputFile.toStdString());
+			qDebug("Shape Spectrum (v2) saved to %s", qUtf8Printable(outputFile));
 		}
 
 		if (logFile1) {
