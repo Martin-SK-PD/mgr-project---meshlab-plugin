@@ -902,9 +902,14 @@ int Mgr_plugin::postCondition(const QAction* filter) const
 int Mgr_plugin::getRequirements(const QAction* filter){
 	switch (ID(filter)) {
 	case FP_FIRST: return MeshModel::MM_VERTCOORD;
-	case FP_SECOND: return MeshModel::MM_VERTCOORD | MeshModel::MM_FACEFACETOPO 
-		| MeshModel::MM_FACENORMAL | MeshModel::MM_FACEFLAG;;
-	case FP_THIRD: return;
+	case FP_SECOND:
+		return MeshModel::MM_VERTCOORD | MeshModel::MM_FACEFACETOPO | MeshModel::MM_FACENORMAL |
+			   MeshModel::MM_FACEFLAG;
+	case FP_THIRD:
+		return MeshModel::MM_VERTCOORD | MeshModel::MM_FACEFACETOPO | MeshModel::MM_FACENORMAL |
+			   MeshModel::MM_FACEFLAG | MeshModel::MM_VERTNORMAL | MeshModel::MM_WEDGNORMAL |
+			   MeshModel::MM_VERTFLAG | MeshModel::MM_VERTQUALITY | MeshModel::MM_VERTCURV |
+			   MeshModel::MM_VERTCURVDIR;
 	default: assert(0); return MeshModel::MM_NONE;
 	}
 }
@@ -915,7 +920,7 @@ int Mgr_plugin::getPreConditions(const QAction* filter) const{
 	switch (ID(filter)) {
     case FP_FIRST:
 	case FP_SECOND:
-	case FP_THIRD: 
+	case FP_THIRD: return MeshModel::MM_FACEFACETOPO | MeshModel::MM_FACENORMAL;
 	default: return MeshModel::MM_NONE;
 	}
 }
