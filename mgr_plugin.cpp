@@ -489,8 +489,8 @@ RichParameterList Mgr_plugin::initParameterList(const QAction* a, const MeshDocu
 	}
 	case FP_THIRD: {
 		QStringList options;
-		options << "Shape Spectrum - MPEG 7 v1 " << "D2 Histogram"
-				<< "Shape Spectrum - MPEG 7 v2";
+		options << "Shape Spectrum - MPEG 7 v1 " << "D2 Histogram";
+		//		<< "Shape Spectrum - MPEG 7 v2";
 		parlst.addParam(
 			RichEnum("descriptorType", 0, options, "Descriptor", "Select descriptor to export"));
 		parlst.addParam(
